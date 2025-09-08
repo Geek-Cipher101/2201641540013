@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Shortener Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .form-group { margin: 15px 0; }
+        label { display: block; margin-bottom: 5px; }
+        input, button { padding: 10px; margin: 5px 0; }
+        input[type="text"], input[type="number"] { width: 100%; box-sizing: border-box; }
+        button { background: #1976d2; color: white; border: none; cursor: pointer; }
+        .result { margin: 20px 0; padding: 15px; background: #e8f5e8; border-radius: 5px; }
+        .error { background: #ffeaea; color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>URL Shortener Application</h1>
+        
+        <form id="urlForm">
+            <div class="form-group">
+                <label for="originalUrl">Original URL:</label>
+                <input type="text" id="originalUrl" placeholder="https://example.com/very-long-url" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="customCode">Custom Short Code (Optional):</label>
+                <input type="text" id="customCode" placeholder="my-custom-code">
+            </div>
+            
+            <div class="form-group">
+                <label for="validityMinutes">Validity Period (Minutes):</label>
+                <input type="number" id="validityMinutes" value="30" min="1" max="10080">
+            </div>
+            
+            <button type="submit">Shorten URL</button>
+        </form>
+        
+        <div id="result" style="display: none;"></div>
+        
+        <h2>All Shortened URLs</h2>
+        <div id="urlList"></div>
+    </div>
+
+    <script>
+        // Logging Middleware
+        class Logger {
+            constructor() {
+                this.logs = [];
+            }
+            
+            log(level, message, data = null) {
+                const timestamp = new Date().toISOString();
+                const logEntry = { timestamp, level, message, data };
+                this.logs.unshift(logEntry);
+                localStorage.setItem('app_logs', JSON.stringify(this.logs.slice(0, 100)));
+            }
+            
+            info(message, data) { this.log('INFO', message, data); }
+            error(message, data) { this.log('ERROR', message, data); }
+        }
+        
+        const logger = new Logger();
+        
+        // URL Service
+        class URLService {
+            constructor() {
+                this.urls = this.loadURLs();
+                this.baseUrl = window.location.origin;
+            }
+            
+            loadURLs() {
+                try {
+                    const stored = localStorage.getItem('shortened_urls');
+                    return stored ? JSON.parse(stored) : {};
+                } catch (e) {
+                    logger.error('Failed to load URLs', e);
+                    return {};
+                }
+            }
+            
+            saveURLs() {
+                localStorage.setItem('shortened_urls', JSON.stringify(this.urls));
+            }
+            
+            generateShortCode(customCode = null) {
+                if (customCode) {
+                    if (!/^[a-zA-Z0-9]+$/.test(customCode)) {
+                        throw new Error('Custom shortcode must be alphanumeric');
+                    }
+                    if (customCode.length < 3 || customCode.length > 20) {
+                        throw new Error('Custom shortcode must be between 3-20 characters');
+                    }
+                    if (this.urls[customCode]) {
+                        throw new Error('Custom shortcode already exists');
+                    }
+                    return customCode;
+                }
+                
+                const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let result = '';
+                do {
+                    result = '';
+                    for (let i = 0; i < 6; i++) {
+                        result += chars.charAt(Math.floor(Math.random() * chars.length));
+                    }
+                } while (this.urls[result]);
+                return result;
+            }
+            
+            validateURL(url) {
+                try {
+                    new URL(url);
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+            
+            shortenURL(originalUrl, customCode = null, validityMinutes = 30) {
+                logger.info('Shortening URL', { originalUrl, customCode, validityMinutes });
+                
+                if (!this.validateURL(originalUrl)) {
+                    throw new Error('Invalid URL format');
+                }
+                
+                const shortCode = this.generateShortCode(customCode);
+                const expiryTime = new Date();
+                expiryTime.setMinutes(expiryTime.getMinutes() + validityMinutes);
+                
+                const urlEntry = {
+                    originalUrl,
+                    shortCode,
+                    createdAt: new Date().toISOString(),
+                    expiryTime: expiryTime.toISOString(),
+                    validityMinutes,
+                    clicks: 0,
+                    clickHistory: []
+                };
+                
+                this.urls[shortCode] = urlEntry;
+                this.saveURLs();
+                
+                return {
+                    shortCode,
+                    shortUrl: `${this.baseUrl}/test.html#${shortCode}`,
+                    originalUrl,
+                    expiryTime: expiryTime.toISOString()
+                };
+            }
+            
+            getAllURLs() {
+                return Object.values(this.urls).map(url => ({
+                    ...url,
+                    shortUrl: `${this.baseUrl}/test.html#${url.shortCode}`,
+                    isExpired: new Date() > new Date(url.expiryTime)
+                }));
+            }
+            
+            redirectURL(shortCode) {
+                const urlEntry = this.urls[shortCode];
+                if (!urlEntry || new Date() > new Date(urlEntry.expiryTime)) {
+                    return null;
+                }
+                
+                urlEntry.clicks++;
+                urlEntry.clickHistory.push({
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent
+                });
+                
+                this.saveURLs();
+                logger.info('URL accessed', { shortCode });
+                return urlEntry.originalUrl;
+            }
+        }
+        
+        const urlService = new URLService();
+        
+        // Form handling
+        document.getElementById('urlForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const originalUrl = document.getElementById('originalUrl').value;
+            const customCode = document.getElementById('customCode').value;
+            const validityMinutes = parseInt(document.getElementById('validityMinutes').value);
+            
+            try {
+                const result = urlService.shortenURL(originalUrl, customCode || null, validityMinutes);
+                
+                document.getElementById('result').innerHTML = `
+                    <div class="result">
+                        <h3>URL Shortened Successfully!</h3>
+                        <p><strong>Short URL:</strong> <a href="${result.shortUrl}" target="_blank">${result.shortUrl}</a></p>
+                        <p><strong>Original URL:</strong> ${result.originalUrl}</p>
+                        <p><strong>Expires:</strong> ${new Date(result.expiryTime).toLocaleString()}</p>
+                        <button onclick="copyToClipboard('${result.shortUrl}')">Copy Short URL</button>
+                    </div>
+                `;
+                document.getElementById('result').style.display = 'block';
+                
+                // Reset form
+                document.getElementById('urlForm').reset();
+                document.getElementById('validityMinutes').value = 30;
+                
+                updateURLList();
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="result error">
+                        <h3>Error</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                document.getElementById('result').style.display = 'block';
+            }
+        });
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+        
+        function updateURLList() {
+            const urls = urlService.getAllURLs();
+            const listHtml = urls.map(url => `
+                <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px;">
+                    <p><strong>Short Code:</strong> ${url.shortCode}</p>
+                    <p><strong>Original URL:</strong> ${url.originalUrl}</p>
+                    <p><strong>Short URL:</strong> <a href="${url.shortUrl}" target="_blank">${url.shortUrl}</a></p>
+                    <p><strong>Clicks:</strong> ${url.clicks}</p>
+                    <p><strong>Status:</strong> ${url.isExpired ? 'Expired' : 'Active'}</p>
+                    <p><strong>Created:</strong> ${new Date(url.createdAt).toLocaleString()}</p>
+                    <button onclick="testRedirect('${url.shortCode}')">Test Redirect</button>
+                </div>
+            `).join('');
+            
+            document.getElementById('urlList').innerHTML = urls.length ? listHtml : '<p>No URLs created yet.</p>';
+        }
+        
+        function testRedirect(shortCode) {
+            const originalUrl = urlService.redirectURL(shortCode);
+            if (originalUrl) {
+                window.open(originalUrl, '_blank');
+                updateURLList(); // Refresh to show updated click count
+            } else {
+                alert('URL not found or expired');
+            }
+        }
+        
+        // Handle hash-based routing for redirects
+        window.addEventListener('hashchange', function() {
+            const shortCode = window.location.hash.substring(1);
+            if (shortCode) {
+                const originalUrl = urlService.redirectURL(shortCode);
+                if (originalUrl) {
+                    window.location.href = originalUrl;
+                } else {
+                    alert('Short URL not found or expired');
+                    window.location.hash = '';
+                }
+            }
+        });
+        
+        // Initial load
+        updateURLList();
+        
+        // Check for redirect on page load
+        if (window.location.hash) {
+            const shortCode = window.location.hash.substring(1);
+            const originalUrl = urlService.redirectURL(shortCode);
+            if (originalUrl) {
+                window.location.href = originalUrl;
+            }
+        }
+    </script>
+</body>
+</html>
