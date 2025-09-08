@@ -36,14 +36,6 @@ I used React because that's what the assignment asked for. The main parts are:
 
 **The redirect thing** - When someone clicks your short link, it automatically sends them to the real URL. If the link is expired or doesn't exist, it shows a nice error message instead of just breaking.
 
-## The technical stuff
-
-I had to use this custom logging system instead of console.log (assignment requirement). It saves everything to localStorage so you can actually see what's happening.
-
-The app stores everything locally in your browser, so your links will be there when you come back. No database needed.
-
-Used Material-UI for the design because it looks professional and I didn't want to spend forever making it look good from scratch.
-
 ## File structure
 
 ```
@@ -54,9 +46,3 @@ src/
 ├── App.js             # Main app setup
 └── index.js          # Entry point
 ```
-
-The whole thing meets all the assignment requirements - React app, custom logging, Material UI, client-side routing, the works. Took me a while to get everything working right but I'm pretty happy with how it turned out.
-
-## Testing
-
-There's also a test.html file if you want to try it without running the React server. Just open that in your browser and it has the same functionality.
